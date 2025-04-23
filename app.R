@@ -77,27 +77,67 @@ server <- function(input, output, session) {
     medResult <- eventReactive(input$importMed, {
         req(input$medFolder)
         
-        parent_dir <- parseDirPath(roots, input$medFolder)
+        # Get the base directory where the app is running
+        app_dir <- getwd()
         
+        # Default mapping files should be in the 'defaults' directory relative to the app
+        default_aa_map <- file.path(app_dir, "defaults", "RK_ActiveAvoidance_MEDtoR_variableNames.xlsx")
+        default_shock_map <- file.path(app_dir, "defaults", "RK_Shock.NoEscape_MEDtoR_variableNames.xlsx")
+        
+        # Get the MED files directory
+        med_base_dir <- parseDirPath(roots, input$medFolder)
+        if(length(med_base_dir) == 0) {
+            stop("Please select a valid directory")
+        }
+        
+        # Set up the actual MED file directories - don't add MedPC again
+        aa_dir <- file.path(med_base_dir, "ActiveAvoidance")
+        shock_dir <- file.path(med_base_dir, "ShockNoEscape")
+        
+        # Use uploaded mapping files if provided, otherwise use defaults
         var_map_aa_path <- if (!is.null(input$varMapAA)) {
             input$varMapAA$datapath
         } else {
-            "defaults/RK_ActiveAvoidance_MEDtoR_variableNames.xlsx"
+            if (!file.exists(default_aa_map)) {
+                stop("Default Active Avoidance mapping file not found at: ", default_aa_map, 
+                     "\nPlease upload a mapping file or place the default file in the correct location.")
+            }
+            default_aa_map
         }
         
         var_map_shock_path <- if (!is.null(input$varMapShock)) {
             input$varMapShock$datapath
         } else {
-            "defaults/RK_Shock.NoEscape_MEDtoR_variableNames.xlsx"
+            if (!file.exists(default_shock_map)) {
+                stop("Default Shock NoEscape mapping file not found at: ", default_shock_map,
+                     "\nPlease upload a mapping file or place the default file in the correct location.")
+            }
+            default_shock_map
         }
         
-        process_and_combine(
-            parent_medpc_dir = parent_dir,
-            var_map_aa       = var_map_aa_path,
-            var_map_shock    = var_map_shock_path,
-            days_aa          = 7,
-            days_shock       = 1
-        )
+        # Print directories for debugging
+        message("Processing directories:")
+        message("AA dir: ", aa_dir)
+        message("Shock dir: ", shock_dir)
+        
+        # Validate directories exist
+        if (!dir.exists(aa_dir)) {
+            stop("Active Avoidance directory not found at: ", aa_dir)
+        }
+        if (!dir.exists(shock_dir)) {
+            stop("Shock NoEscape directory not found at: ", shock_dir)
+        }
+        
+        withProgress(message = 'Processing files...', {
+            result <- process_and_combine(
+                parent_medpc_dir = med_base_dir,
+                var_map_aa      = var_map_aa_path,
+                var_map_shock   = var_map_shock_path,
+                days_aa         = 7,
+                days_shock      = 1
+            )
+        })
+        result
     })
     
     # Now medResult() is a list with $operant, $meta and $settings

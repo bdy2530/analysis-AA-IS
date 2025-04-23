@@ -1,20 +1,37 @@
 # process one experiment folder for up to `max_day` days
-process_experiment <- function(experiment,   # e.g. "Active.Avoidance"
-                               file_prefix,  # e.g. "Active.Avoidance_"
-                               med_dir,      # e.g. "R:/…/ActiveAvoidance"
-                               var_map_xlsx,
+process_experiment <- function(experiment,   # e.g. "ActiveAvoidance"
+                               file_prefix,    # e.g. "Active.Avoidance_"
+                               med_dir,        # e.g. "R:/…/ActiveAvoidance"
+                               var_map_xlsx,   # Full path to the Excel mapping file
                                max_day = Inf){
-  # 1) list all non‐directory files in med_dir
+  
+  # Create variable mapping directory if it doesn't exist
+  var_map_dir <- file.path(dirname(med_dir), "variable_mappings")
+  dir.create(var_map_dir, showWarnings = FALSE, recursive = TRUE)
+  
+  # List MED files
   MedFiles <- list.files(med_dir, full.names=TRUE) %>% 
     setdiff(list.dirs(med_dir, full.names=TRUE, recursive=FALSE))
   
-  # ensure “.txt” on every file
+  # ensure ".txt" on every file
   walk(MedFiles, ~ if(!grepl("\\.txt$",.x)) file.rename(.x,paste0(.x,".txt")))
   MedFiles <- list.files(med_dir, full.names=TRUE) %>% 
     setdiff(list.dirs(med_dir, full.names=TRUE, recursive=FALSE))
   
+  # Filter files that match the prefix
+  MedFiles <- MedFiles[grepl(paste0("^", file_prefix), basename(MedFiles))]
+  
+  if(length(MedFiles) == 0) {
+    warning("No matching files found in directory: ", med_dir)
+    return(list(
+      Operant_Data = tibble(),
+      meta_Data = tibble(),
+      settings_num = tibble()
+    ))
+  }
+  
   # 2) load or init
-  rd_prefix <- file.path(med_dir,paste0(experiment,"_"))
+  rd_prefix <- file.path(med_dir, paste0(experiment,"_"))
   op_rds   <- paste0(rd_prefix,"Operant_Data.Rds")
   meta_rds <- paste0(rd_prefix,"meta_Data.Rds")
   set_rds  <- paste0(rd_prefix,"settings_num.Rds")
@@ -23,15 +40,13 @@ process_experiment <- function(experiment,   # e.g. "Active.Avoidance"
   meta_Data    <- if(file.exists(meta_rds)) readRDS(meta_rds) else tibble()
   settings_num <- if(file.exists(set_rds))  readRDS(set_rds)  else tibble()
   
+  
   # 3) loop
   for(f in MedFiles){
-    nm <- basename(f) %>% str_remove("\\.txt$")
-    if(!startsWith(nm, file_prefix)) next
-    
     MED <- if (experiment=="ActiveAvoidance") {
-      ReadNameMED_ActiveAvoidance(f, var_map_xlsx)
+      ReadNameMED_ActiveAvoidance(medFile = f, var_map_xlsx = var_map_xlsx)
     } else {
-      ReadNameMED_Shock.NoEscape(f, var_map_xlsx)
+      ReadNameMED_Shock.NoEscape(medFile = f, var_map_xlsx = var_map_xlsx)
     }
     
     # --- build meta.add exactly as before ---
@@ -111,11 +126,12 @@ process_experiment <- function(experiment,   # e.g. "Active.Avoidance"
   
   # only up to max_day
   res <- list(
-    Operant_Data = Operant_Data,
-    meta_Data    = meta_Data,
-    settings_num = settings_num
+    Operant_Data = Operant_Data %>% as_tibble(),
+    meta_Data    = meta_Data %>% as_tibble(),
+    settings_num = settings_num %>% as_tibble()
   )
-  if ("Day" %in% names(meta_Data)) {
+  
+  if (nrow(res$meta_Data) > 0 && "Day" %in% names(res$meta_Data)) {
     res <- map(res, ~ filter(.x, Day <= max_day))
   }
   return(res)
@@ -127,10 +143,18 @@ process_and_combine <- function(parent_medpc_dir,
                                 var_map_aa,
                                 var_map_shock,
                                 days_aa    = 7,
-                                days_shock = 1){
-  aa_dir    <- file.path(parent_medpc_dir,"ActiveAvoidance")
-  shock_dir <- file.path(parent_medpc_dir,"ShockNoEscape")
+                                days_shock = 1) {
   
+  # Construct the actual MED file directories - don't add MedPC again
+  aa_dir    <- file.path(parent_medpc_dir, "ActiveAvoidance")
+  shock_dir <- file.path(parent_medpc_dir, "ShockNoEscape")
+  
+  # Print directories for debugging
+  message("Processing directories in combine:")
+  message("AA dir: ", aa_dir)
+  message("Shock dir: ", shock_dir)
+  
+  # Process each experiment
   aa <- process_experiment(
     experiment   = "ActiveAvoidance",
     file_prefix  = "Active.Avoidance_",
@@ -147,15 +171,33 @@ process_and_combine <- function(parent_medpc_dir,
     max_day      = days_shock
   )
   
-  combined_operant <- bind_rows(aa$Operant_Data,    shock$Operant_Data)    %>% arrange(Subject, Day, DateTime)
-  combined_meta    <- bind_rows(aa$meta_Data,       shock$meta_Data)       %>% arrange(Subject, Day, DateTime)
-  combined_settings<- bind_rows(aa$settings_num,    shock$settings_num)    %>% arrange(Subject, Day)
+  # Combine results
+  combined_operant <- bind_rows(
+    aa$Operant_Data %>% as_tibble(),
+    shock$Operant_Data %>% as_tibble()
+  ) %>% 
+    arrange(Subject, Day, DateTime)
   
-  saveRDS(combined_operant,  file.path(parent_medpc_dir,"Combined_Operant_Data.Rds"))
-  saveRDS(combined_meta,     file.path(parent_medpc_dir,"Combined_meta_Data.Rds"))
-  saveRDS(combined_settings, file.path(parent_medpc_dir,"Combined_settings_num.Rds"))
+  combined_meta <- bind_rows(
+    aa$meta_Data %>% as_tibble(),
+    shock$meta_Data %>% as_tibble()
+  ) %>% 
+    arrange(Subject, Day, DateTime)
   
-  invisible(list(operant=combined_operant,
-                 meta=combined_meta,
-                 settings=combined_settings))
+  combined_settings <- bind_rows(
+    aa$settings_num %>% as_tibble(),
+    shock$settings_num %>% as_tibble()
+  ) %>% 
+    arrange(Subject, Day)
+  
+  # Save combined results
+  saveRDS(combined_operant,  file.path(parent_medpc_dir, "Combined_Operant_Data.Rds"))
+  saveRDS(combined_meta,     file.path(parent_medpc_dir, "Combined_meta_Data.Rds"))
+  saveRDS(combined_settings, file.path(parent_medpc_dir, "Combined_settings_num.Rds"))
+  
+  invisible(list(
+    operant = combined_operant,
+    meta = combined_meta,
+    settings = combined_settings
+  ))
 }

@@ -1,11 +1,15 @@
 # Read MED file Active Avoidance function ----------------------------------------------
-ReadNameMED_ActiveAvoidance <- function(MedFiles, i0, var_map_xlsx){
-  if (missing(MedFiles) || length(MedFiles) < i0) {
-    stop("No MED file available at index ", i0)
+ReadNameMED_ActiveAvoidance <- function(medFile, var_map_xlsx){
+  # Remove the i0 parameter since we're passing the direct file path now
+  if (!file.exists(medFile)) {
+    stop("MED file not found: ", medFile)
   }
   if (!file.exists(var_map_xlsx)) {
     stop("Mapping file not found: ", var_map_xlsx)
   }
+  
+  # Read the content of the file into a list with a $text element.
+  contents <- readtext(medFile)
   
   # Read the Excel file that contains a conversion table.
   # This table maps MED variable names (in column “DIM”) to their desired R names (in column “R”).
@@ -14,7 +18,7 @@ ReadNameMED_ActiveAvoidance <- function(MedFiles, i0, var_map_xlsx){
     select(!c(Instance, rename.R)) %>% unique()
   ###### This section reads the MED file, converts the text into numbers, and renames the output variables.
   # Read the content of the file (using the i0th file in MedFiles) into a list with a $text element.
-  contents <- readtext(MedFiles[i0])
+  contents <- readtext(medFile)
   
   #put -987.987 in for empty variables or DIMs, can remove later to make parsing file easier
   #-987.987 in first position of a DIM should not signify anything, can empty it later or ignore.
@@ -84,7 +88,7 @@ ReadNameMED_ActiveAvoidance <- function(MedFiles, i0, var_map_xlsx){
   
   
   #extract data from file naming convention
-  fileNameData <- stringr::str_split(MedFiles[i0],"/|\\\\")[[1]] #parse path
+  fileNameData <- stringr::str_split(medFile,"/|\\\\")[[1]] #parse path
   fileNameData <- stringr::str_replace(fileNameData[length(fileNameData)], ".txt", "") #get filename
   fileNameDataSplt <- stringr::str_split(fileNameData,"_") #split parts of filename
   LfileNameDataSplt <- as.list(fileNameDataSplt[[1]]) #make list
@@ -145,9 +149,10 @@ MED.array.detangle <- function(arr){
 
 
 # Read MED file Shock.NoEscape function ----------------------------------------------
-ReadNameMED_Shock.NoEscape <- function(MedFiles, i0, var_map_xlsx){
-  if (missing(MedFiles) || length(MedFiles) < i0) {
-    stop("No MED file available at index ", i0)
+ReadNameMED_Shock.NoEscape <- function(medFile, var_map_xlsx){
+  # Same changes as above
+  if (!file.exists(medFile)) {
+    stop("MED file not found: ", medFile)
   }
   if (!file.exists(var_map_xlsx)) {
     stop("Mapping file not found: ", var_map_xlsx)
